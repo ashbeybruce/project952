@@ -6,9 +6,9 @@ Read the humidity from shtc3
 Upload data to Azure IoT Hub  
 Use python3  
 ## Dependence
-pip install smbus2  
-pip install bitarray  
-pip install azure-iot-device  
+pip3 install smbus2  
+pip3 install bitarray  
+pip3 install azure-iot-device  
 ## Running
 python3 read_sensors.py  
 ## Visit the url to watch the curve of the data:
