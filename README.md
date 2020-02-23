@@ -1,4 +1,5 @@
 ## project952
+Yi Huang  
 420-952-LA Applied Object-Oriented Programming for IIoT W20  
 Read the temperature from tmp117  
 Read the humidity from shtc3  
