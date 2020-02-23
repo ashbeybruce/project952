@@ -11,5 +11,5 @@ pip3 install bitarray
 pip3 install azure-iot-device  
 ## Running
 python3 read_sensors.py  
-## Visit the url to watch the curve of the data:
+## Visit the url to check real-time data:
 https://iot-hub-data-visualization.azurewebsites.net  
