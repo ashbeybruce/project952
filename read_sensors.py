@@ -31,6 +31,7 @@ from bitarray import bitarray, util
 import os
 import time
 from azure.iot.device import IoTHubDeviceClient, Message
+import sensor_config as sc
 
 class sensors(object):
     def check_haddress(self, sensor_name, haddress):
@@ -51,11 +52,6 @@ class sensors(object):
             return haddress
 
 class TMP117(sensors):
-    temp_max_value = 50
-    temp_min_value = -20
-    sensor_temperature_register = 0x00
-    sensor_configure_register = 0x01
-
     def __init__(self, haddress=0x48, i2c_channel=1):
         self.hadd = haddress
         self.hadd = sensors.check_haddress(self, 'TMP117', self.hadd)
@@ -69,53 +65,61 @@ class TMP117(sensors):
     def get_haddress(self):
         return self.hadd
 
-    def sensor_configure(self, conv=0b100, avg=0b01):
+    def set_time_lag(self, conv=0b100, avg=0b01):
         with SMBus(self.i2c_ch) as bus:
             #read the configure register
             #print(self.hadd, self.sensor_configure_register)
-            conf = bus.read_i2c_block_data(self.hadd, self.sensor_configure_register, 2)
-            print("Old CONFIG:", conf)
+            conf = bus.read_i2c_block_data(self.hadd, sc.TMP117_CONF_REGISTER, 2)
+            #print("Old CONFIG:", conf)
             #high8 = util.int2ba(conf[0], 8)[:6] + util.int2ba(conv, 3)[:2]
             #low8 = util.int2ba(conv, 3)[2:] + util.int2ba(avg, 2) + util.int2ba(conf[1], 8)[3:]
             #print(high8, low8)
             conf[0] = util.ba2int(util.int2ba(conf[0], 8)[:6] + util.int2ba(conv, 3)[:2])
             conf[1] = util.ba2int(util.int2ba(conv, 3)[2:] + util.int2ba(avg, 2) + util.int2ba(conf[1], 8)[3:])
             #print(conf)
-            bus.write_i2c_block_data(self.hadd, self.sensor_configure_register, conf)
-            conf = bus.read_i2c_block_data(self.hadd, self.sensor_configure_register, 2)
-            print("New CONFIG:", conf)
+            bus.write_i2c_block_data(self.hadd, sc.TMP117_CONF_REGISTER, conf)
+            conf = bus.read_i2c_block_data(self.hadd, sc.TMP117_CONF_REGISTER, 2)
+            #print("New CONFIG:", conf)
 
-    def read_temp(self):
+    def read_temp_c(self):
         with SMBus(self.i2c_ch) as bus:
-            temp_val = bus.read_i2c_block_data(self.hadd, self.sensor_temperature_register, 2)
-            return ((temp_val[0] << 8) | (temp_val[1])) * 0.0078125
+            temp_val = bus.read_i2c_block_data(self.hadd, sc.TMP117_TEMP_REGISTER, 2)
+            return ((temp_val[0] << 8) | (temp_val[1])) * sc.TMP117_RESOLUTION
 
+    def read_temp_f(self):
+        return self.read_temp_c() * 9.0 / 5.0 + 32.0
+        
     def most_acc_limit(self):
-        if self.read_temp() > self.temp_max_value or self.read_temp() < self.temp_min_value:
+        if self.read_temp_c() > sc.TEMP_MAX_VALUE or self.read_temp_c() < sc.TEMP_MIX_VALUE:
+            return True
+        else:
             return False
-        return True
 
 class SHTC3(sensors):
-    dev_reg = '/sys/bus/i2c/devices/i2c-1/new_device'
-    dev_reg_param = 'shtc1 0x70'
-    dev_temp = '/sys/class/hwmon/hwmon1/temp1_input'
-    dev_humd = '/sys/class/hwmon/hwmon1/humidity1_input'
-
 ##    def __init__(self, haddress=0x70, i2c_channel=1):
 ##        self.hadd = haddress
 ##        self.hadd = super.check_haddress('SHTC3', self.hadd)
 ##        self.i2c_ch = i2c_channel
 
     def dev_reg(self):
-        if not os.path.isfile(self.dev_temp) and not os.path.isfile(self.dev_humd):
-            with open(self.dev_reg, 'wb') as f:
-                f.write(self.dev_reg_param)
+        if not os.path.isfile(sc.SHTC3_TEMP) and not os.path.isfile(sc.SHTC3_HUMD):
+            try:
+                with open('shtc3_reg.sh', 'w') as f:
+                    f.write(sc.SHTC3_REG)
+                os.system('chmod +x ./shtc3_reg.sh')
+                os.system('./shtc3_reg.sh')
+                os.system('rm ./shtc3_reg.sh')
+                return True
+            except:
+                return False
+        else:
+            return True
 
     def read_data(self):
-        with open(self.dev_temp, 'rb') as f:
+        with open(sc.SHTC3_TEMP, 'rb') as f:
             val = f.read().strip()
             temperature = float(int(val)) / 1000
-        with open(self.dev_humd, 'rb') as f:
+        with open(sc.SHTC3_HUMD, 'rb') as f:
             val = f.read().strip()
             humidity = float(int(val)) / 1000
         return (temperature, humidity)
@@ -139,16 +143,17 @@ class AzureIoTHub(object):
         except:
             print ("Fail to sent message.")
 
-
 def main():
     tmp117 = TMP117()
     shtc3 = SHTC3()
-    tmp117.sensor_configure(0b011, 0b01)  #set to 500ms
-    shtc3.dev_reg()
+    tmp117.set_time_lag(0b011, 0b01)  #set to 500ms
+    if not shtc3.dev_reg():
+        print('Fail to register the humidity sensor!')
+        return False
     azure_iothub_client = AzureIoTHub()
     try:
         while True:
-            temperature = tmp117.read_temp()
+            temperature = tmp117.read_temp_c()
             humidity = shtc3.read_data()[1]
             print('Temperature: ' + str(temperature) + ' | Humidity: ' + str(humidity) + ' | Time: ' + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
             azure_iothub_client.iothub_client_telemetry_run(temperature, humidity)
